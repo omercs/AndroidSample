@@ -40,9 +40,18 @@ public class SecureWebServerService extends Service {
     @Override
     public void onCreate() {
         super.onCreate();
-        sws = new SecureWebServer(this);
-        sws.start();
-        createNotification();
+        
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                Log.d(TAG, "SecureWebServer constructor needs time to setup trust manager");
+                sws = new SecureWebServer(SecureWebServerService.this);
+                sws.start();
+                createNotification();                   
+                 
+            }
+        }).start();
+        
     }
 
     /**
@@ -85,5 +94,4 @@ public class SecureWebServerService extends Service {
                 getNotification();
         startForeground(ONGOING_NOTIFICATION, notification);
     }
-
 }

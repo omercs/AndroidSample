@@ -2,6 +2,7 @@
 package com.example.certificate_demo;
 
 import android.app.Activity;
+import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.SharedPreferences.Editor;
@@ -17,9 +18,18 @@ import android.widget.Button;
 import android.widget.TextView;
 
 import java.io.BufferedInputStream;
+import java.io.FileInputStream;
 import java.io.IOException;
+import java.security.KeyStore;
+import java.security.KeyStoreException;
+import java.security.NoSuchAlgorithmException;
 import java.security.PrivateKey;
+import java.security.UnrecoverableKeyException;
+import java.security.cert.CertificateException;
 import java.security.cert.X509Certificate;
+
+import javax.net.ssl.KeyManagerFactory;
+import javax.net.ssl.SSLContext;
 
 public class MainActivity extends Activity implements KeyChainAliasCallback {
 
@@ -27,6 +37,8 @@ public class MainActivity extends Activity implements KeyChainAliasCallback {
      * The file name of the PKCS12 file used
      */
     public static final String PKCS12_FILENAME = "keychain.p12";
+
+    public static final String PKCS12__CLIENT_FILENAME = "server.p12";
 
     /**
      * The pass phrase of the PKCS12 file
@@ -48,7 +60,7 @@ public class MainActivity extends Activity implements KeyChainAliasCallback {
     private static final String KEYCHAIN_PREF = "keychain";
 
     // Name of preference name that saves the alias
-    private static final String KEYCHAIN_PREF_ALIAS = "alias";
+    public static final String KEYCHAIN_PREF_ALIAS = "alias";
 
     // Request code used when starting the activity using the KeyChain install
     // intent
@@ -65,6 +77,8 @@ public class MainActivity extends Activity implements KeyChainAliasCallback {
 
     // Button to launch the browser for testing https://localhost:8080
     private Button testSslButton;
+
+    private Button buttonWebview;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -84,6 +98,9 @@ public class MainActivity extends Activity implements KeyChainAliasCallback {
                     // the key chain information
                     disableKeyChainButton();
                     printInfo();
+
+                    // add sslcontext
+                    AuthenticationActivity.sharedSSLContext = getSSLContext();
                 } else {
                     Log.d(TAG, "Key Chain is not accessible");
                 }
@@ -123,6 +140,18 @@ public class MainActivity extends Activity implements KeyChainAliasCallback {
                 startActivity(i);
             }
         });
+
+        buttonWebview = (Button)findViewById(R.id.buttonWebview);
+        buttonWebview.setOnClickListener(new OnClickListener() {
+
+            @Override
+            public void onClick(View v) {
+                Intent intent = new Intent();
+                intent.setClass(MainActivity.this, AuthenticationActivity.class);
+                intent.putExtra("TARGET_URL", TEST_SSL_URL);
+                startActivity(intent);
+            }
+        });
     }
 
     /**
@@ -137,6 +166,41 @@ public class MainActivity extends Activity implements KeyChainAliasCallback {
         if (isStopServer) {
             serverButton.setText(R.string.server_start);
             stopServer();
+        }
+    }
+
+    private void getSSLContext() {
+
+        SSLContext sslContext = SSLContext.getInstance("TLS");
+
+        // Get a key manager factory using the default algorithm
+        KeyManagerFactory kmf;
+        try {
+            kmf = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm());
+
+            // Load the PKCS12 key chain
+            KeyStore ks = KeyStore.getInstance("PKCS12");
+            FileInputStream fis = MainActivity.this.getAssets()
+                    .openFd(MainActivity.PKCS12__CLIENT_FILENAME).createInputStream();
+            ks.load(fis, MainActivity.PKCS12_PASSWORD.toCharArray());
+            kmf.init(ks, MainActivity.PKCS12_PASSWORD.toCharArray());
+            X509Certificate[] certs = getCertificateChain(getAlias(getApplicationContext()));
+
+        } catch (NoSuchAlgorithmException e) {
+            // TODO Auto-generated catch block
+            e.printStackTrace();
+        } catch (KeyStoreException e) {
+            // TODO Auto-generated catch block
+            e.printStackTrace();
+        } catch (IOException e) {
+            // TODO Auto-generated catch block
+            e.printStackTrace();
+        } catch (UnrecoverableKeyException e) {
+            // TODO Auto-generated catch block
+            e.printStackTrace();
+        } catch (CertificateException e) {
+            // TODO Auto-generated catch block
+            e.printStackTrace();
         }
     }
 
@@ -160,8 +224,8 @@ public class MainActivity extends Activity implements KeyChainAliasCallback {
      * 
      * @return The alias of the key chain
      */
-    private String getAlias() {
-        SharedPreferences pref = getSharedPreferences(KEYCHAIN_PREF, MODE_PRIVATE);
+    public static String getAlias(Context ctx) {
+        SharedPreferences pref = ctx.getSharedPreferences(KEYCHAIN_PREF, MODE_PRIVATE);
         return pref.getString(KEYCHAIN_PREF_ALIAS, DEFAULT_ALIAS);
     }
 
@@ -179,7 +243,7 @@ public class MainActivity extends Activity implements KeyChainAliasCallback {
      * This method prints the key chain information.
      */
     private void printInfo() {
-        String alias = getAlias();
+        String alias = getAlias(getApplicationContext());
         X509Certificate[] certs = getCertificateChain(alias);
         final PrivateKey privateKey = getPrivateKey(alias);
         final StringBuffer sb = new StringBuffer();
@@ -266,7 +330,8 @@ public class MainActivity extends Activity implements KeyChainAliasCallback {
      * @return true if the key chain is not installed or allowed
      */
     private boolean isKeyChainAccessible() {
-        return getCertificateChain(getAlias()) != null && getPrivateKey(getAlias()) != null;
+        return getCertificateChain(getAlias(getApplicationContext())) != null
+                && getPrivateKey(getAlias(getApplicationContext())) != null;
     }
 
     /**

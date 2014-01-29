@@ -29,10 +29,19 @@ import javax.net.ssl.KeyManagerFactory;
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.SSLServerSocket;
 import javax.net.ssl.SSLServerSocketFactory;
+import javax.net.ssl.TrustManager;
+import javax.net.ssl.TrustManagerFactory;
+import javax.net.ssl.X509TrustManager;
 
 import android.content.Context;
+import android.security.KeyChain;
 import android.util.Base64;
 import android.util.Log;
+import java.io.BufferedInputStream;
+import java.io.IOException;
+import java.security.PrivateKey;
+import java.security.cert.CertificateException;
+import java.security.cert.X509Certificate;
 
 public class SecureWebServer {
 
@@ -43,6 +52,7 @@ public class SecureWebServer {
     private static final String EMBEDDED_IMAGE_FILENAME = "training-prof.png";
 
     private SSLServerSocketFactory sssf;
+
     private SSLServerSocket sss;
 
     // A flag to control whether the web server should be kept running
@@ -60,22 +70,60 @@ public class SecureWebServer {
             SSLContext sslContext = SSLContext.getInstance("TLS");
 
             // Get a key manager factory using the default algorithm
-            KeyManagerFactory kmf = KeyManagerFactory
-                    .getInstance(KeyManagerFactory.getDefaultAlgorithm());
+            KeyManagerFactory kmf = KeyManagerFactory.getInstance(KeyManagerFactory
+                    .getDefaultAlgorithm());
 
             // Load the PKCS12 key chain
             KeyStore ks = KeyStore.getInstance("PKCS12");
-            FileInputStream fis = ctx.getAssets()
-                    .openFd(MainActivity.PKCS12_FILENAME)
+            FileInputStream fis = ctx.getAssets().openFd(MainActivity.PKCS12_FILENAME)
                     .createInputStream();
             ks.load(fis, MainActivity.PKCS12_PASSWORD.toCharArray());
             kmf.init(ks, MainActivity.PKCS12_PASSWORD.toCharArray());
 
-            // Initialize the SSL context
-            sslContext.init(kmf.getKeyManagers(), null, null);
+            // trust managers
+            TrustManagerFactory tmf = TrustManagerFactory.getInstance(TrustManagerFactory
+                    .getDefaultAlgorithm());
+            tmf.init((KeyStore)null); // Use the default trust store
+            TrustManager[] trustManagers = tmf.getTrustManagers();
+            final X509TrustManager origTrustManager = (X509TrustManager)trustManagers[0];
+            String alias = MainActivity.getAlias(ctx);
 
+            final X509Certificate[] caCerts = KeyChain.getCertificateChain(ctx, alias);
+
+            X509TrustManager fakeTrustManager = new X509TrustManager() {
+                public void checkClientTrusted(X509Certificate[] chain, String authType)
+                        throws CertificateException {
+                    // Key the behaviour of the default trust manager.
+                    Log.d(TAG, "checkClientTrusted");
+                    origTrustManager.checkClientTrusted(chain, authType);
+                }
+
+                public void checkServerTrusted(X509Certificate[] chain, String authType)
+                        throws CertificateException {
+                    // Key the behaviour of the default trust manager.
+                    Log.d(TAG, "checkServerTrusted");
+                    origTrustManager.checkServerTrusted(chain, authType);
+                }
+
+                public X509Certificate[] getAcceptedIssuers() {
+                    // This is only used for sending the list of acceptable CA
+                    // DNs.
+                    Log.d(TAG, "getAcceptedIssuers");
+                    return caCerts;
+                }
+            };
+            
+            trustManagers = new X509TrustManager[] {
+                fakeTrustManager
+            };
+
+            // Initialize the SSL context with key manager and trust managers
+            //            sslContext.init(kmf.getKeyManagers(), trustManagers, null);
+
+            sslContext.init(kmf.getKeyManagers(), null, null);
             // Create the SSL server socket factory
             sssf = sslContext.getServerSocketFactory();
+            
 
         } catch (Exception e) {
             e.printStackTrace();
@@ -97,7 +145,15 @@ public class SecureWebServer {
                 Log.d(TAG, "Secure Web Server is starting up on port 8080");
                 try {
                     // Create the secure server socket
-                    sss = (SSLServerSocket) sssf.createServerSocket(8080);
+                    sss = (SSLServerSocket)sssf.createServerSocket(8080);
+                    // setWantClientAuth is used to request client certificate
+                    // authentication, but keep the connection if no
+                    // authentication is provided. setNeedClientAuth is used to
+                    // request and require client certificate authentication:
+                    // the connection will terminate if no suitable client
+                    // certificate is presented.
+                    sss.setNeedClientAuth(true);
+
                 } catch (Exception e) {
                     System.out.println("Error: " + e);
                     return;
@@ -108,14 +164,12 @@ public class SecureWebServer {
                     try {
                         // Wait for an SSL connection
                         Socket socket = sss.accept();
-
                         // Got a connection
                         Log.d(TAG, "Connected, sending data.");
 
-                        BufferedReader in = new BufferedReader(
-                                new InputStreamReader(socket.getInputStream()));
-                        PrintWriter out = new PrintWriter(socket
-                                .getOutputStream());
+                        BufferedReader in = new BufferedReader(new InputStreamReader(
+                                socket.getInputStream()));
+                        PrintWriter out = new PrintWriter(socket.getOutputStream());
 
                         // Read the data until a blank line is reached which
                         // signifies the end of the client HTTP headers
@@ -164,7 +218,7 @@ public class SecureWebServer {
     /**
      * This method reads a binary image from the assets folder and returns the
      * base64 encoded image string.
-     *
+     * 
      * @param ctx The service this web server is running in.
      * @return String The base64 encoded image string or "" if there is an
      *         exception
@@ -181,5 +235,4 @@ public class SecureWebServer {
         }
         return "";
     }
-
 }
