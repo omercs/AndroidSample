@@ -131,12 +131,11 @@ public class AuthenticationActivity extends Activity {
             @Override
             public void run() {
                 // make https request
-
                 // based on response load webview
                 HttpWebRequest request = null;
                 try {
                     request = new HttpWebRequest(new URL(postUrl));
-                    request.setSSLContext(mSSSLContext)
+                    request.setSSLContext(sharedSSLContext);
                 } catch (MalformedURLException e) {
                     // TODO Auto-generated catch block
                     e.printStackTrace();
@@ -148,6 +147,10 @@ public class AuthenticationActivity extends Activity {
                     @Override
                     public void onComplete(HttpWebResponse response, Exception exception) {
                         Log.d(TAG, "Webrequest is complete");
+                        if (exception != null) {
+                            Log.e(TAG, "webrequest has exception:", exception);
+                        }
+
                         if (response != null && response.getBody() != null) {
                             // load document from the https response
                             String html = "hello";

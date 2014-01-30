@@ -34,14 +34,8 @@ import javax.net.ssl.TrustManagerFactory;
 import javax.net.ssl.X509TrustManager;
 
 import android.content.Context;
-import android.security.KeyChain;
 import android.util.Base64;
 import android.util.Log;
-import java.io.BufferedInputStream;
-import java.io.IOException;
-import java.security.PrivateKey;
-import java.security.cert.CertificateException;
-import java.security.cert.X509Certificate;
 
 public class SecureWebServer {
 
@@ -57,6 +51,11 @@ public class SecureWebServer {
 
     // A flag to control whether the web server should be kept running
     private boolean isRunning = true;
+
+    /**
+     * hacky way to change condition for client certs
+     */
+    public static boolean sRequireClientCert = false;
 
     // The base64 encoded image string used as an embedded image
     private final String base64Image;
@@ -85,45 +84,16 @@ public class SecureWebServer {
                     .getDefaultAlgorithm());
             tmf.init((KeyStore)null); // Use the default trust store
             TrustManager[] trustManagers = tmf.getTrustManagers();
-            final X509TrustManager origTrustManager = (X509TrustManager)trustManagers[0];
-            String alias = MainActivity.getAlias(ctx);
-
-            final X509Certificate[] caCerts = KeyChain.getCertificateChain(ctx, alias);
-
-            X509TrustManager fakeTrustManager = new X509TrustManager() {
-                public void checkClientTrusted(X509Certificate[] chain, String authType)
-                        throws CertificateException {
-                    // Key the behaviour of the default trust manager.
-                    Log.d(TAG, "checkClientTrusted");
-                    origTrustManager.checkClientTrusted(chain, authType);
-                }
-
-                public void checkServerTrusted(X509Certificate[] chain, String authType)
-                        throws CertificateException {
-                    // Key the behaviour of the default trust manager.
-                    Log.d(TAG, "checkServerTrusted");
-                    origTrustManager.checkServerTrusted(chain, authType);
-                }
-
-                public X509Certificate[] getAcceptedIssuers() {
-                    // This is only used for sending the list of acceptable CA
-                    // DNs.
-                    Log.d(TAG, "getAcceptedIssuers");
-                    return caCerts;
-                }
-            };
-            
             trustManagers = new X509TrustManager[] {
-                fakeTrustManager
+                new MockTrustManager()
             };
 
             // Initialize the SSL context with key manager and trust managers
-            //            sslContext.init(kmf.getKeyManagers(), trustManagers, null);
+            sslContext.init(kmf.getKeyManagers(), trustManagers, null);
 
-            sslContext.init(kmf.getKeyManagers(), null, null);
+            // sslContext.init(kmf.getKeyManagers(), null, null);
             // Create the SSL server socket factory
             sssf = sslContext.getServerSocketFactory();
-            
 
         } catch (Exception e) {
             e.printStackTrace();
@@ -152,7 +122,7 @@ public class SecureWebServer {
                     // request and require client certificate authentication:
                     // the connection will terminate if no suitable client
                     // certificate is presented.
-                    sss.setNeedClientAuth(true);
+                    sss.setNeedClientAuth(sRequireClientCert);
 
                 } catch (Exception e) {
                     System.out.println("Error: " + e);
@@ -162,6 +132,8 @@ public class SecureWebServer {
                 Log.d(TAG, "Waiting for connection");
                 while (isRunning) {
                     try {
+                        sss.setNeedClientAuth(sRequireClientCert);
+                        Log.d(TAG, "Set client cert requirement to:" + sRequireClientCert);
                         // Wait for an SSL connection
                         Socket socket = sss.accept();
                         // Got a connection

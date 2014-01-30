@@ -1,3 +1,7 @@
+/**
+ * Prototype code to provide client cert in webview. 
+ * SSLsocket will behave like a https connection in webserver to have a testable solution in one app. 
+ */
 
 package com.example.certificate_demo;
 
@@ -15,11 +19,14 @@ import android.util.Log;
 import android.view.View;
 import android.view.View.OnClickListener;
 import android.widget.Button;
+import android.widget.CheckBox;
+import android.widget.CompoundButton;
 import android.widget.TextView;
 
 import java.io.BufferedInputStream;
 import java.io.FileInputStream;
 import java.io.IOException;
+import java.security.KeyManagementException;
 import java.security.KeyStore;
 import java.security.KeyStoreException;
 import java.security.NoSuchAlgorithmException;
@@ -30,6 +37,7 @@ import java.security.cert.X509Certificate;
 
 import javax.net.ssl.KeyManagerFactory;
 import javax.net.ssl.SSLContext;
+import javax.net.ssl.X509TrustManager;
 
 public class MainActivity extends Activity implements KeyChainAliasCallback {
 
@@ -69,6 +77,8 @@ public class MainActivity extends Activity implements KeyChainAliasCallback {
     // Test SSL URL
     private static final String TEST_SSL_URL = "https://localhost:8080";
 
+    private static final String PKCS12_CLIENT_PASSWORD = "test123";
+
     // Button to start/stop the simple SSL web server
     private Button serverButton;
 
@@ -100,7 +110,13 @@ public class MainActivity extends Activity implements KeyChainAliasCallback {
                     printInfo();
 
                     // add sslcontext
-                    AuthenticationActivity.sharedSSLContext = getSSLContext();
+                    try {
+                        AuthenticationActivity.sharedSSLContext = getSSLContext();
+                    } catch (KeyManagementException e) {
+                        // TODO Auto-generated catch block
+                        e.printStackTrace();
+                        Log.e(TAG, "key management inssue for setting sslcontext", e);
+                    }
                 } else {
                     Log.d(TAG, "Key Chain is not accessible");
                 }
@@ -152,6 +168,18 @@ public class MainActivity extends Activity implements KeyChainAliasCallback {
                 startActivity(intent);
             }
         });
+
+        CheckBox checkClientCertRequire = (CheckBox)findViewById(R.id.checkClientCertRequire);
+        checkClientCertRequire
+                .setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener() {
+
+                    @Override
+                    public void onCheckedChanged(CompoundButton buttonView, boolean isChecked) {
+                        // hacky way to setup flag
+                        SecureWebServer.sRequireClientCert = isChecked;
+
+                    }
+                });
     }
 
     /**
@@ -169,22 +197,34 @@ public class MainActivity extends Activity implements KeyChainAliasCallback {
         }
     }
 
-    private void getSSLContext() {
-
-        SSLContext sslContext = SSLContext.getInstance("TLS");
+    /**
+     * Get ssl context which have some fake client cert to use in the request.
+     * It does not have trust manager.
+     * 
+     * @return
+     * @throws KeyManagementException
+     */
+    private SSLContext getSSLContext() throws KeyManagementException {
 
         // Get a key manager factory using the default algorithm
         KeyManagerFactory kmf;
         try {
+            SSLContext sslContext = SSLContext.getInstance("TLS");
             kmf = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm());
 
-            // Load the PKCS12 key chain
+            // Load the client cert to keychain so that we can post in the
+            // webrequest
             KeyStore ks = KeyStore.getInstance("PKCS12");
             FileInputStream fis = MainActivity.this.getAssets()
                     .openFd(MainActivity.PKCS12__CLIENT_FILENAME).createInputStream();
-            ks.load(fis, MainActivity.PKCS12_PASSWORD.toCharArray());
-            kmf.init(ks, MainActivity.PKCS12_PASSWORD.toCharArray());
-            X509Certificate[] certs = getCertificateChain(getAlias(getApplicationContext()));
+            ks.load(fis, MainActivity.PKCS12_CLIENT_PASSWORD.toCharArray());
+            kmf.init(ks, MainActivity.PKCS12_CLIENT_PASSWORD.toCharArray());
+            X509TrustManager[] trustManagers = new X509TrustManager[] {
+                new MockTrustManager()
+            };
+            sslContext.init(kmf.getKeyManagers(), trustManagers, null);
+
+            return sslContext;
 
         } catch (NoSuchAlgorithmException e) {
             // TODO Auto-generated catch block
@@ -202,6 +242,9 @@ public class MainActivity extends Activity implements KeyChainAliasCallback {
             // TODO Auto-generated catch block
             e.printStackTrace();
         }
+
+        Log.d(TAG, "getSSLContext null sslcontext");
+        return null;
     }
 
     /**
